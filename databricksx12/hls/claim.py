@@ -1,15 +1,13 @@
 from databricksx12.edi import EDI, AnsiX12Delim, Segment
 from databricksx12.hls.loop import Loop
-from databricksx12.hls.identities import *
+from databricksx12.hls.identities import PatientIdentity, ProviderIdentity, DiagnosisIdentity, Submitter_Receiver_Identity, ClaimIdentity, PayerIdentity, ServiceLine
 from typing import List, Dict
 import functools
 from collections import defaultdict
 
-
 #
 # Base claim builder (transaction -> 1 or more claims)
 #
-
 
 class ClaimBuilder(EDI):
     #
@@ -27,7 +25,7 @@ class ClaimBuilder(EDI):
     # @param clm_segment - the claim segment of claim to build
     # @param idx - the index of the claim segment in the data
     #
-    #  @return the class containing the relevent claim information
+    # @return the class containing the relevent claim information
     #
     def build_claim(self, clm_segment, idx):
         return self.trnx_cls(
@@ -38,32 +36,31 @@ class ClaimBuilder(EDI):
             claim_loop=self.get_claim_loop(idx),
             sl_loop=self.get_service_line_loop(idx),  # service line loop
         )
-
-
         
     #
     # https://datainsight.health/edi/payments/dollars-separate/
-    #  trx_header_loop = 0000
-    #  payer_loop = 1000A
-    #  payee_loop = 1000B
-    #  clm_payment_loop = 2100
-    #  srv_payment_loop = 2110
+    # trx_header_loop = 0000
+    # payer_loop = 1000A
+    # payee_loop = 1000B
+    # clm_payment_loop = 2100
+    # srv_payment_loop = 2110
     def build_remittance(self, pay_segment, idx):
-        return self.trnx_cls(trx_header_loop = self.data[0:self.index_of_segment(self.data, "N1")]
-                             ,payer_loop = self.data[self.index_of_segment(self.data, "N1"):self.index_of_segment(self.data, "N1", self.index_of_segment(self.data, "N1")+1)]
-                             ,payee_loop = self.data[self.index_of_segment(self.data, "N1", self.index_of_segment(self.data, "N1")+1): self.index_of_segment(self.data, "LX")]
-                             ,clm_loop = self.data[idx:min(
-                                 list(filter(lambda x: x > 0, [self.index_of_segment(self.data, "LX", idx+1), 
-                                  self.index_of_segment(self.data, "CLP", idx+1),
-                                  self.index_of_segment(self.data, "SE", idx+1),
-                                  len(self.data)])
-                                ))]
-                             ,trx_summary_loop = self.data[max(0,
-                                self.last_index_of_segment(self.data, "LX"),
-                                self.last_index_of_segment(self.data, "CLP"),
-                                self.last_index_of_segment(self.data, "SVC")
-                             ):]
-                            )
+        return self.trnx_cls(
+            trx_header_loop = self.data[0:self.index_of_segment(self.data, "N1")],
+            payer_loop = self.data[self.index_of_segment(self.data, "N1"):self.index_of_segment(self.data, "N1", self.index_of_segment(self.data, "N1")+1)],
+            payee_loop = self.data[self.index_of_segment(self.data, "N1", self.index_of_segment(self.data, "N1")+1): self.index_of_segment(self.data, "LX")],
+            clm_loop = self.data[idx:min(
+                list(filter(lambda x: x > 0, [self.index_of_segment(self.data, "LX", idx+1), 
+                self.index_of_segment(self.data, "CLP", idx+1),
+                self.index_of_segment(self.data, "SE", idx+1),
+                len(self.data)])))],
+            trx_summary_loop = self.data[
+                max(0, 
+                    self.last_index_of_segment(self.data, "LX"), 
+                    self.last_index_of_segment(self.data, "CLP"),
+                    self.last_index_of_segment(self.data, "SVC")
+                ):]
+        )
 
     #
     # Determine claim loop: starts at the clm index and ends at LX segment, or CLM segment, or end of data
@@ -98,7 +95,6 @@ class ClaimBuilder(EDI):
         if bht_start_indexes:
             sub_rec_start_idx = max(bht_start_indexes)
             sub_rec_end_idx = max(bht_end_indexes)
-
             return self.data[sub_rec_start_idx:sub_rec_end_idx]
         return []
 
@@ -144,36 +140,39 @@ class MedicalClaim(EDI):
     # Return first segment found of name == name otherwise Segment.empty()
     #
     def _first(self, segments, name, start_index = 0):
-        return ([x for x in segments[start_index:] if x.segment_name() == name][0]  if len([x for x in segments[start_index:] if x.segment_name() == name]) > 0 else Segment.empty())
+        filtered_segments = [x for x in segments[start_index:] if x.segment_name() == name]
+        return filtered_segments[0] if filtered_segments else Segment.empty()
         
     def _populate_providers(self):
         return {"billing": self._billing_provider()}
     
     def _billing_provider(self):
-        return ProviderIdentity(nm1=self._first(self.billing_loop, "NM1"),
-                                n3=self._first(self.billing_loop, "N3"),
-                                n4=self._first(self.billing_loop, "N4"),
-                                ref=self._first(self.billing_loop, "REF"))
+        return ProviderIdentity(
+            nm1=self._first(self.billing_loop, "NM1"),
+            n3=self._first(self.billing_loop, "N3"),
+            n4=self._first(self.billing_loop, "N4"),
+            ref=self._first(self.billing_loop, "REF"))
 
     def _populate_diagnosis(self):
         return DiagnosisIdentity([x for x in self.claim_loop if x.segment_name() == "HI"])
     
     def _populate_submitter_loop(self) -> Dict[str, str]:
-        return Submitter_Receiver_Identity(nm1=self._first([x for x in self.sender_receiver_loop if x.element(1) == "41"],"NM1"),
-                                           per=self._first(self.sender_receiver_loop, "PER"))
+        nm1_segment = self._first([x for x in self.sender_receiver_loop if x.element(1) == "41"], "NM1")
+        per_segment = self._first(self.sender_receiver_loop, "PER")
+        return Submitter_Receiver_Identity(nm1=nm1_segment, per=per_segment)
     
     def _populate_receiver_loop(self) -> Dict[str, str]:
         return Submitter_Receiver_Identity(nm1=self._first([x for x in self.sender_receiver_loop if x.element(1) == "40"],"NM1"))
 
     def _populate_subscriber_loop(self):
-        l = self.subscriber_loop[0:min(filter(lambda x: x!= -1, [self.index_of_segment(self.subscriber_loop, "CLM"), len(self.subscriber_loop)]))] #subset the subscriber loop before the CLM segment
+        subscriber_loop = self.subscriber_loop[0:min(filter(lambda x: x!= -1, [self.index_of_segment(self.subscriber_loop, "CLM"), len(self.subscriber_loop)]))] #subset the subscriber loop before the CLM segment
         return PatientIdentity(
-            nm1 = self._first(l, "NM1"),
-            n3 = self._first(l, "N3"),
-            n4 = self._first(l, "N4"),
-            dmg = self._first(l, "DMG"),            
-            pat = self._first(l, "PAT"),
-            sbr = self._first(l, "SBR")
+            nm1 = self._first(subscriber_loop, "NM1"),
+            n3 = self._first(subscriber_loop, "N3"),
+            n4 = self._first(subscriber_loop, "N4"),
+            dmg = self._first(subscriber_loop, "DMG"),            
+            pat = self._first(subscriber_loop, "PAT"),
+            sbr = self._first(subscriber_loop, "SBR")
         )
     
     def _populate_patient_loop(self) -> Dict[str, str]:
@@ -188,11 +187,15 @@ class MedicalClaim(EDI):
             sbr = self._first(self.patient_loop, "SBR"))            
     
     def _populate_claim_loop(self):
-        return ClaimIdentity(clm = self._first(self.claim_loop, "CLM"),
-                             dtp = self.segments_by_name("DTP", data=self.claim_loop))
+        return ClaimIdentity(
+            clm = self._first(self.claim_loop, "CLM"),
+            dtp = self.segments_by_name("DTP", data=self.claim_loop))
 
-    def _populate_payer_info(self):
-        return PayerIdentity(self._first([x for x in self.subscriber_loop if x.element(1) == "PR"], "NM1"))
+    def _populate_payer_info(self, segment_id="NM1", segment_id_cc="PR"):
+        return PayerIdentity(
+            self._first(
+                [x for x in self.subscriber_loop if x.element(1) == segment_id_cc],
+                segment_id))
     
     """
     Overall Asks
@@ -204,7 +207,8 @@ class MedicalClaim(EDI):
             **{'receiver': self.receiver_info.to_dict()},
             **{'subscriber': self.subscriber_info.to_dict()},
             **{'patient': self.patient_info.to_dict()},
-            **{'payer': self.payer_info.to_dict()},
+            **{'processing_payer': self.payer_processing_info.to_dict()},
+            **{'receiving_payer': self.payer_receiving_info.to_dict()},
             **{'providers': {k:v.to_dict() for k,v in self.provider_info.items()}}, #returns a dictionary of k=provider type
             **{'claim_header': self.claim_info.to_dict()},
             **{'claim_lines': [x.to_dict() for x in self.sl_info]}, #List
@@ -230,7 +234,8 @@ class MedicalClaim(EDI):
         self.claim_info = self._populate_claim_loop()
         self.provider_info = self._populate_providers()
         self.diagnosis_info = self._populate_diagnosis()
-        self.payer_info = self._populate_payer_info()
+        self.payer_receiving_info = self._populate_payer_info(segment_id="NM1", segment_id_cc="40")
+        self.payer_processing_info = self._populate_payer_info(segment_id="NM1", segment_id_cc="PR")
 
 class Claim837i(MedicalClaim):
 
@@ -239,9 +244,10 @@ class Claim837i(MedicalClaim):
     # Format for 837I https://www.dhs.wisconsin.gov/publications/p0/p00266.pdf
     
     def _attending_provider(self):
-        return ProviderIdentity(nm1=self._first([x for x in self.claim_loop if x.element(1) == "71"],"NM1"),
-                                prv=self._first([x for x in self.claim_loop if x.element(1) == "AT"],"PRV"),
-                                ref=self._first(self.claim_loop, "REF")) # only occurs once post CLM loop providers
+        return ProviderIdentity(
+            nm1=self._first([x for x in self.claim_loop if x.element(1) == "71"],"NM1"),
+            prv=self._first([x for x in self.claim_loop if x.element(1) == "AT"],"PRV"),
+            ref=self._first(self.claim_loop, "REF"))
 
     def _operating_provider(self):
         return ProviderIdentity(nm1=self._first([x for x in self.claim_loop if x.element(1) == "72"],"NM1"),
@@ -255,17 +261,19 @@ class Claim837i(MedicalClaim):
         return ProviderIdentity(nm1=self._first([x for x in self.claim_loop if x.element(1) == "FA"],"NM1")) # also in 837P but rare
         
     def _populate_providers(self):
-        return {"billing": self._billing_provider(),
-                "attending": self._attending_provider(),
-                "operating": self._operating_provider(),
-                "other": self._other_provider(),
-                "facility": self._facility_provider()
-                }
+        return {
+            "billing": self._billing_provider(),
+            "attending": self._attending_provider(),
+            "operating": self._operating_provider(),
+            "other": self._other_provider(),
+            "facility": self._facility_provider()
+            }
 
     def _populate_claim_loop(self):
-        return ClaimIdentity(clm = self._first(self.claim_loop, "CLM"),
-                             dtp = self.segments_by_name("DTP", data = self.claim_loop),
-                             cl1 = self._first(self.claim_loop, "CL1"))
+        return ClaimIdentity(
+            clm = self._first(self.claim_loop, "CLM"),
+            dtp = self.segments_by_name("DTP", data = self.claim_loop), 
+            cl1 = self._first(self.claim_loop, "CL1"))
     
     def _populate_sl_loop(self, missing=""):
         return list(
@@ -283,22 +291,26 @@ class Claim837p(MedicalClaim):
     # Format of 837P https://www.dhs.wisconsin.gov/publications/p0/p00265.pdf
 
     def _rendering_provider(self):
-        return ProviderIdentity(nm1=self._first([x for x in self.claim_loop if x.element(1) == "82"],"NM1"),
-                                prv=self._first([x for x in self.claim_loop if x.element(1) == "PE"],"PRV"))
+        return ProviderIdentity(
+            nm1=self._first([x for x in self.claim_loop if x.element(1) == "82"],"NM1"),
+            prv=self._first([x for x in self.claim_loop if x.element(1) == "PE"],"PRV"))
     
     def _referring_provider(self):
-        return ProviderIdentity(nm1=self._first([x for x in self.claim_loop if x.element(1) == "DN"],"NM1"),
-                                prv=self._first([x for x in self.claim_loop if x.element(1) == "RF"],"PRV"))
+        return ProviderIdentity(
+            nm1=self._first([x for x in self.claim_loop if x.element(1) == "DN"],"NM1"),
+            prv=self._first([x for x in self.claim_loop if x.element(1) == "RF"],"PRV"))
 
     def _service_facility_provider(self):
-        return ProviderIdentity(nm1=self._first([x for x in self.claim_loop if x.element(1) == "77"],"NM1"))
+        return ProviderIdentity(
+            nm1=self._first([x for x in self.claim_loop if x.element(1) == "77"],"NM1"))
 
     def _populate_providers(self):
-        return {"billing": self._billing_provider(),
-                "referring": self._referring_provider(),
-                "servicing": (self._billing_provider() if self._rendering_provider() is None else self._rendering_provider()),
-                "service_facility": self._service_facility_provider()
-                }
+        return {
+            "billing": self._billing_provider(),
+            "referring": self._referring_provider(),
+            "servicing": (self._billing_provider() if self._rendering_provider() is None else self._rendering_provider()),
+            "service_facility": self._service_facility_provider()
+            }
 
     
     def _populate_sl_loop(self, missing=""):
@@ -318,12 +330,7 @@ class Remittance(MedicalClaim):
 
     NAME = "835"
     
-    def __init__(self,
-                 trx_header_loop,
-                 payer_loop,
-                 payee_loop,
-                 clm_loop,
-                 trx_summary_loop):
+    def __init__(self, trx_header_loop, payer_loop, payee_loop, clm_loop, trx_summary_loop):
         self.trx_header_loop = trx_header_loop
         self.payer_loop = payer_loop
         self.payee_loop = payee_loop
@@ -346,14 +353,14 @@ class Remittance(MedicalClaim):
                 'provider_adjustment_reason_cd': p.element(i+1, 0),
                 'provider_adjustment_id': p.element(i+1, 1),
                 'provider_adjustment_amt': p.element(i+2)
-            }
-             for i in list(range(2,p.segment_len(), 3))]
+            } for i in list(range(2,p.segment_len(), 3))]
             for p in self.segments_by_name("PLB", data=self.trx_summary_loop)]
 
     def populate_payer_loop(self):
         return {
             'entity_id_cd': self._first(self.payer_loop, "N1").element(1),
             'payer_name': self._first(self.payer_loop, "N1").element(2),
+            'payer_id': self._first(self.payer_loop, "N1").element(3),
             'payer_street': self._first(self.payer_loop, "N3").element(1),
             'payer_city': self._first(self.payer_loop, "N4").element(1),
             'payer_state': self._first(self.payer_loop, "N4").element(2),
@@ -460,5 +467,3 @@ class Remittance(MedicalClaim):
             **{'claim': self.clm_info},
             **{'provider_adjustments': self.plb_info}
         }
-    
-    
