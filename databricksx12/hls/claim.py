@@ -191,11 +191,9 @@ class MedicalClaim(EDI):
             clm = self._first(self.claim_loop, "CLM"),
             dtp = self.segments_by_name("DTP", data=self.claim_loop))
 
-    def _populate_payer_info(self, segment_id="NM1", segment_id_cc="PR"):
+    def _populate_payer_info(self):
         return PayerIdentity(
-            self._first(
-                [x for x in self.subscriber_loop if x.element(1) == segment_id_cc],
-                segment_id))
+            self._first([x for x in self.subscriber_loop if x.element(1) == "PR"], "NM1"))
     
     """
     Overall Asks
@@ -207,8 +205,7 @@ class MedicalClaim(EDI):
             **{'receiver': self.receiver_info.to_dict()},
             **{'subscriber': self.subscriber_info.to_dict()},
             **{'patient': self.patient_info.to_dict()},
-            **{'processing_payer': self.payer_processing_info.to_dict()},
-            **{'receiving_payer': self.payer_receiving_info.to_dict()},
+            **{'payer': self.payer_info.to_dict()},
             **{'providers': {k:v.to_dict() for k,v in self.provider_info.items()}}, #returns a dictionary of k=provider type
             **{'claim_header': self.claim_info.to_dict()},
             **{'claim_lines': [x.to_dict() for x in self.sl_info]}, #List
@@ -234,8 +231,7 @@ class MedicalClaim(EDI):
         self.claim_info = self._populate_claim_loop()
         self.provider_info = self._populate_providers()
         self.diagnosis_info = self._populate_diagnosis()
-        self.payer_receiving_info = self._populate_payer_info(segment_id="NM1", segment_id_cc="40")
-        self.payer_processing_info = self._populate_payer_info(segment_id="NM1", segment_id_cc="PR")
+        self.payer_info = self._populate_payer_info()
 
 class Claim837i(MedicalClaim):
 
@@ -360,7 +356,7 @@ class Remittance(MedicalClaim):
         return {
             'entity_id_cd': self._first(self.payer_loop, "N1").element(1),
             'payer_name': self._first(self.payer_loop, "N1").element(2),
-            'payer_id': self._first(self.payer_loop, "N1").element(3),
+            'payer_id': self._first(self.payer_loop, "N1").element(4),
             'payer_street': self._first(self.payer_loop, "N3").element(1),
             'payer_city': self._first(self.payer_loop, "N4").element(1),
             'payer_state': self._first(self.payer_loop, "N4").element(2),
