@@ -114,6 +114,8 @@ class ServiceLine(Identity):
                         "prcdr_cd": sv2.element(2, 1, ""),
                         "prcdr_cd_type": sv2.element(2, 0, ""),
                         "modifier_cds": ','.join(filter(lambda x: x!="", [sv2.element(2, 2, ""), sv2.element(2, 3, ""), sv2.element(2, 4,""), sv2.element(2, 5, "")])),
+                        "place_of_service": None,
+                        "dg_cd_pntr": None,
                         "revenue_cd": sv2.element(1),
                         "service_date": dtp.element(3),
                         "service_time": dtp.element(1),
@@ -136,10 +138,10 @@ class ServiceLine(Identity):
                         "modifier_cds": ','.join(filter(lambda x: x!="", [sv1.element(1, 2, ""), sv1.element(1, 3, ""), sv1.element(1, 4,""), sv1.element(1, 5, "")])),
                         "place_of_service": sv1.element(5),
                         "dg_cd_pntr": sv1.element(7),
+                        "revenue_cd": None,
                         "service_date": dtp.element(3),
                         "service_time": dtp.element(1),
                         "date_format": dtp.element(2)
-
                     }
                 })
         
