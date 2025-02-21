@@ -353,6 +353,7 @@ class Remittance(MedicalClaim):
     def populate_payer_loop(self):
         return {
             'entity_id_cd': self._first(self.payer_loop, "N1").element(1),
+            'payer_id': self._first(self.payer_loop, "N1").element(4),
             'payer_name': self._first(self.payer_loop, "N1").element(2),
             'payer_street': self._first(self.payer_loop, "N3").element(1),
             'payer_city': self._first(self.payer_loop, "N4").element(1),
